@@ -30,9 +30,11 @@ import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.LibraryBooks
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Collections
 import androidx.compose.material.icons.filled.CreateNewFolder
@@ -54,6 +56,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -532,7 +535,9 @@ fun LibraryScreen(onComicClick: (Uri) -> Unit) {
 @Composable
 fun ComicItem(comic: Comic, onClick: () -> Unit) {
     val context = LocalContext.current
+    val viewModel: ComicViewModel = viewModel()
     var thumbnail by remember { mutableStateOf<Bitmap?>(null) }
+    val isCompleted = remember(comic.uri) { viewModel.isCompleted(comic.uri) }
     
     LaunchedEffect(comic.uri) {
         withContext(Dispatchers.IO) {
@@ -566,6 +571,19 @@ fun ComicItem(comic: Comic, onClick: () -> Unit) {
                 }
             }
             
+            if (isCompleted) {
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = "Completed",
+                    tint = Color.Green,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .size(24.dp)
+                        .background(Color.Black.copy(alpha = 0.5f), shape = MaterialTheme.shapes.small)
+                )
+            }
+
             Surface(
                 modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
                 color = Color.Black.copy(alpha = 0.7f)
@@ -822,8 +840,13 @@ fun ReaderScreen(uri: Uri, onBack: () -> Unit) {
     val pages by viewModel.currentComicPages.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
     var isZoomed by remember { mutableStateOf(false) }
     var isUIVisible by remember { mutableStateOf(true) }
+    var showJumpDialog by remember { mutableStateOf(false) }
+    var showRestartDialog by remember { mutableStateOf(false) }
+    var initialPageSet by remember { mutableStateOf(false) }
     
     val prefs = remember { context.getSharedPreferences("comics_prefs", Context.MODE_PRIVATE) }
     val readingMode = remember { prefs.getString("reading_mode", "horizontal") ?: "horizontal" }
@@ -860,7 +883,26 @@ fun ReaderScreen(uri: Uri, onBack: () -> Unit) {
                     }
                 }
             } else {
-                val pagerState = rememberPagerState(pageCount = { pages.size })
+                val lastRead = remember(uri) { viewModel.getLastReadPage(uri) }
+                val isCompleted = remember(uri) { viewModel.isCompleted(uri) }
+                val pagerState = rememberPagerState(initialPage = 0, pageCount = { pages.size })
+
+                LaunchedEffect(pages) {
+                    if (pages.isNotEmpty() && !initialPageSet) {
+                        if (isCompleted) {
+                            showRestartDialog = true
+                        } else if (lastRead > 0) {
+                            pagerState.scrollToPage(lastRead)
+                        }
+                        initialPageSet = true
+                    }
+                }
+
+                LaunchedEffect(pagerState.currentPage) {
+                    if (initialPageSet) {
+                        viewModel.saveLastReadPage(uri, pagerState.currentPage, pages.size)
+                    }
+                }
 
                 if (readingMode == "horizontal") {
                     HorizontalPager(
@@ -924,6 +966,11 @@ fun ReaderScreen(uri: Uri, onBack: () -> Unit) {
                                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
                             }
                         },
+                        actions = {
+                            IconButton(onClick = { showJumpDialog = true }) {
+                                Icon(Icons.Default.Menu, contentDescription = "Jump to page", tint = Color.White)
+                            }
+                        },
                         colors = TopAppBarDefaults.topAppBarColors(
                             containerColor = Color.Black.copy(alpha = 0.8f)
                         )
@@ -961,6 +1008,70 @@ fun ReaderScreen(uri: Uri, onBack: () -> Unit) {
                             }
                         }
                     }
+                }
+
+                if (showJumpDialog) {
+                    var jumpPageText by remember { mutableStateOf((pagerState.currentPage + 1).toString()) }
+                    AlertDialog(
+                        onDismissRequest = { showJumpDialog = false },
+                        title = { Text("Jump to Page") },
+                        text = {
+                            Column {
+                                Text("Enter page number (1 - ${pages.size})")
+                                Spacer(modifier = Modifier.height(8.dp))
+                                TextField(
+                                    value = jumpPageText,
+                                    onValueChange = { jumpPageText = it },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                val page = jumpPageText.toIntOrNull()?.minus(1)
+                                if (page != null && page in pages.indices) {
+                                    scope.launch {
+                                        pagerState.scrollToPage(page)
+                                    }
+                                    showJumpDialog = false
+                                }
+                            }) {
+                                Text("Go")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showJumpDialog = false }) {
+                                Text("Cancel")
+                            }
+                        }
+                    )
+                }
+
+                if (showRestartDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showRestartDialog = false },
+                        title = { Text("Finished Comic") },
+                        text = { Text("You have already finished reading this comic. Would you like to start over from the beginning?") },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                viewModel.resetProgress(uri)
+                                scope.launch { pagerState.scrollToPage(0) }
+                                showRestartDialog = false
+                            }) {
+                                Text("Start Over")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = {
+                                scope.launch { pagerState.scrollToPage(pages.size - 1) }
+                                showRestartDialog = false
+                            }) {
+                                Text("Resume End")
+                            }
+                        }
+                    )
                 }
             }
         }

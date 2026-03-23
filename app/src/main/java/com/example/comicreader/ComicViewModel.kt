@@ -1,6 +1,7 @@
 package com.example.comicreader
 
 import android.app.Application
+import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
@@ -19,6 +20,9 @@ import kotlinx.coroutines.withContext
  * @param application The [Application] context.
  */
 class ComicViewModel(application: Application) : AndroidViewModel(application) {
+    private val progressPrefs = application.getSharedPreferences("comic_progress", Context.MODE_PRIVATE)
+    private val completedPrefs = application.getSharedPreferences("comic_completed", Context.MODE_PRIVATE)
+
     private val _currentComicPages = MutableStateFlow<List<String>>(emptyList())
     /**
      * A [StateFlow] emitting the list of entry names for the current comic's pages.
@@ -67,5 +71,44 @@ class ComicViewModel(application: Application) : AndroidViewModel(application) {
         return withContext(Dispatchers.IO) {
             ComicUtils.getPageBitmap(getApplication(), uri, entryName)
         }
+    }
+
+    /**
+     * Saves the last read page for a comic.
+     */
+    fun saveLastReadPage(uri: Uri, page: Int, totalPages: Int) {
+        progressPrefs.edit().putInt(uri.toString(), page).apply()
+        if (page == totalPages - 1 && totalPages > 0) {
+            setCompleted(uri, true)
+        }
+    }
+
+    /**
+     * Gets the last read page for a comic.
+     */
+    fun getLastReadPage(uri: Uri): Int {
+        return progressPrefs.getInt(uri.toString(), 0)
+    }
+
+    /**
+     * Marks a comic as completed or not.
+     */
+    fun setCompleted(uri: Uri, completed: Boolean) {
+        completedPrefs.edit().putBoolean(uri.toString(), completed).apply()
+    }
+
+    /**
+     * Checks if a comic is completed.
+     */
+    fun isCompleted(uri: Uri): Boolean {
+        return completedPrefs.getBoolean(uri.toString(), false)
+    }
+
+    /**
+     * Resets progress for a comic.
+     */
+    fun resetProgress(uri: Uri) {
+        progressPrefs.edit().remove(uri.toString()).apply()
+        setCompleted(uri, false)
     }
 }
