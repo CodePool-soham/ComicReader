@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.util.Log
 import com.github.junrar.Archive
 import java.io.BufferedInputStream
@@ -12,6 +13,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
 import java.util.regex.Pattern
+import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
 
 /**
@@ -28,8 +30,8 @@ object ComicUtils {
      * @return A list of entry names, sorted in natural order.
      */
     fun getPages(context: Context, uri: Uri): List<String> {
-        val fileName = getFileName(context, uri) ?: ""
-        return if (fileName.lowercase().endsWith(".cbr")) {
+        val fileName = getFileName(context, uri)?.lowercase() ?: ""
+        return if (fileName.endsWith(".cbr") || fileName.endsWith(".rar")) {
             val tempFile = File(context.cacheDir, "temp_pages_${System.currentTimeMillis()}.cbr")
             try {
                 copyUriToFile(context, uri, tempFile)
@@ -43,7 +45,7 @@ object ComicUtils {
     }
 
     /**
-     * Extracts a list of entry names representing pages from a .cbz file.
+     * Extracts a list of entry names representing pages from a .cbz file (Uri based).
      */
     fun getPagesFromCbz(context: Context, uri: Uri): List<String> {
         val pages = mutableListOf<String>()
@@ -70,6 +72,30 @@ object ComicUtils {
     }
 
     /**
+     * Extracts a list of entry names representing pages from a ZIP file (.cbz).
+     * Faster than ZipInputStream as it uses random access.
+     */
+    fun getPagesFromZip(file: File): List<String> {
+        val pages = mutableListOf<String>()
+        try {
+            ZipFile(file).use { zipFile ->
+                val entries = zipFile.entries()
+                while (entries.hasMoreElements()) {
+                    val entry = entries.nextElement()
+                    if (!entry.isDirectory &&
+                        !entry.name.contains("__MACOSX", ignoreCase = true) &&
+                        isImageFile(entry.name)) {
+                        pages.add(entry.name)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error reading ZIP pages from ${file.path}", e)
+        }
+        return pages.sortedWith(NaturalOrderComparator())
+    }
+
+    /**
      * Extracts a list of entry names representing pages from a .cbr file.
      */
     fun getPagesFromCbr(file: File): List<String> {
@@ -92,9 +118,6 @@ object ComicUtils {
 
     /**
      * Checks if a filename corresponds to an image file.
-     *
-     * @param filename The name of the file to check.
-     * @return True if the file has an image extension, false otherwise.
      */
     fun isImageFile(filename: String): Boolean {
         val lower = filename.lowercase()
@@ -104,16 +127,20 @@ object ComicUtils {
     }
 
     /**
+     * Checks if a filename corresponds to a supported archive file.
+     */
+    fun isArchiveFile(filename: String?): Boolean {
+        val lower = filename?.lowercase() ?: return false
+        return lower.endsWith(".cbz") || lower.endsWith(".zip") || 
+               lower.endsWith(".cbr") || lower.endsWith(".rar")
+    }
+
+    /**
      * Retrieves the [Bitmap] for a specific entry name within a comic file.
-     *
-     * @param context The [Context] for accessing the content resolver.
-     * @param uri The [Uri] of the comic file.
-     * @param entryName The name of the file entry for the page within the archive.
-     * @return The [Bitmap] of the page, or null if it could not be retrieved.
      */
     fun getPageBitmap(context: Context, uri: Uri, entryName: String): Bitmap? {
-        val fileName = getFileName(context, uri) ?: ""
-        return if (fileName.lowercase().endsWith(".cbr")) {
+        val fileName = getFileName(context, uri)?.lowercase() ?: ""
+        return if (fileName.endsWith(".cbr") || fileName.endsWith(".rar")) {
             val tempFile = File(context.cacheDir, "temp_bitmap_${System.currentTimeMillis()}.cbr")
             try {
                 copyUriToFile(context, uri, tempFile)
@@ -127,7 +154,7 @@ object ComicUtils {
     }
 
     /**
-     * Retrieves the [Bitmap] for a specific entry name within a .cbz file.
+     * Retrieves the [Bitmap] for a specific entry name within a .cbz file (Uri based).
      */
     fun getPageBitmapFromCbz(context: Context, uri: Uri, entryName: String): Bitmap? {
         try {
@@ -136,17 +163,9 @@ object ComicUtils {
                     var entry = zipInputStream.nextEntry
                     while (entry != null) {
                         if (entry.name == entryName) {
-                            val outputStream = ByteArrayOutputStream()
-                            val buffer = ByteArray(65536)
-                            var len: Int
-                            while (zipInputStream.read(buffer).also { len = it } != -1) {
-                                outputStream.write(buffer, 0, len)
-                            }
-                            val data = outputStream.toByteArray()
-
                             val options = BitmapFactory.Options()
                             options.inPreferredConfig = Bitmap.Config.RGB_565
-                            return BitmapFactory.decodeByteArray(data, 0, data.size, options)
+                            return BitmapFactory.decodeStream(zipInputStream, null, options)
                         }
                         zipInputStream.closeEntry()
                         entry = zipInputStream.nextEntry
@@ -155,6 +174,27 @@ object ComicUtils {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error getting CBZ page bitmap: $entryName from $uri", e)
+        }
+        return null
+    }
+
+    /**
+     * Retrieves the [Bitmap] for a specific entry name within a ZIP file.
+     */
+    fun getPageBitmapFromZip(file: File, entryName: String): Bitmap? {
+        try {
+            ZipFile(file).use { zipFile ->
+                val entry = zipFile.getEntry(entryName)
+                if (entry != null) {
+                    zipFile.getInputStream(entry).use { inputStream ->
+                        val options = BitmapFactory.Options()
+                        options.inPreferredConfig = Bitmap.Config.RGB_565
+                        return BitmapFactory.decodeStream(inputStream, null, options)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting ZIP page bitmap: $entryName from ${file.path}", e)
         }
         return null
     }
@@ -184,10 +224,7 @@ object ComicUtils {
 
     /**
      * Gets a cached thumbnail file for a comic, or extracts it if not cached.
-     *
-     * @param context The [Context] for accessing folders.
-     * @param uri The [Uri] of the comic file.
-     * @return The [File] pointing to the thumbnail, or null if it could not be generated.
+     * Optimized to avoid redundant extraction and copying.
      */
     fun getThumbnailFile(context: Context, uri: Uri): File? {
         val cacheDir = File(context.cacheDir, "thumbnails")
@@ -200,26 +237,97 @@ object ComicUtils {
             return thumbnailFile
         }
 
-        // Not cached, extract it
         try {
-            val pages = getPages(context, uri)
-            if (pages.isNotEmpty()) {
-                val firstPage = pages.first()
-                val bitmap = getPageBitmap(context, uri, firstPage)
-                bitmap?.let {
-                    val thumb = Bitmap.createScaledBitmap(it, it.width / 4, it.height / 4, true)
-                    FileOutputStream(thumbnailFile).use { out ->
-                        thumb.compress(Bitmap.CompressFormat.JPEG, 80, out)
-                    }
-                    it.recycle()
-                    thumb.recycle()
-                    return thumbnailFile
+            val fileName = getFileName(context, uri)?.lowercase() ?: ""
+            val isRar = fileName.endsWith(".cbr") || fileName.endsWith(".rar")
+            
+            val bitmap: Bitmap? = if (isRar) {
+                val tempFile = File(context.cacheDir, "thumb_temp_${System.currentTimeMillis()}.cbr")
+                try {
+                    copyUriToFile(context, uri, tempFile)
+                    val pages = getPagesFromCbr(tempFile)
+                    if (pages.isNotEmpty()) {
+                        getPageBitmapFromCbr(tempFile, pages.first())
+                    } else null
+                } finally {
+                    tempFile.delete()
                 }
+            } else {
+                var foundBitmap: Bitmap? = null
+                context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                    ZipInputStream(BufferedInputStream(inputStream)).use { zis ->
+                        var entry = zis.nextEntry
+                        while (entry != null) {
+                            if (!entry.isDirectory && !entry.name.contains("__MACOSX") && isImageFile(entry.name)) {
+                                val options = BitmapFactory.Options()
+                                options.inPreferredConfig = Bitmap.Config.RGB_565
+                                foundBitmap = BitmapFactory.decodeStream(zis, null, options)
+                                break
+                            }
+                            zis.closeEntry()
+                            entry = zis.nextEntry
+                        }
+                    }
+                }
+                foundBitmap
+            }
+
+            bitmap?.let {
+                val thumb = Bitmap.createScaledBitmap(it, it.width / 4, it.height / 4, true)
+                FileOutputStream(thumbnailFile).use { out ->
+                    thumb.compress(Bitmap.CompressFormat.JPEG, 80, out)
+                }
+                if (it != thumb) it.recycle()
+                thumb.recycle()
+                return thumbnailFile
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error generating thumbnail for $uri", e)
         }
         return null
+    }
+
+    /**
+     * Scans a directory recursively for comic files efficiently using DocumentsContract.
+     */
+    fun scanDirectory(context: Context, treeUri: Uri, results: MutableList<Pair<Uri, String>>) {
+        val rootId = DocumentsContract.getTreeDocumentId(treeUri)
+        scanDirectoryRecursive(context, treeUri, rootId, results)
+    }
+
+    private fun scanDirectoryRecursive(context: Context, rootUri: Uri, parentDocumentId: String, results: MutableList<Pair<Uri, String>>) {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(rootUri, parentDocumentId)
+        
+        try {
+            context.contentResolver.query(
+                childrenUri,
+                arrayOf(
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                    DocumentsContract.Document.COLUMN_MIME_TYPE
+                ),
+                null, null, null
+            )?.use { cursor ->
+                val idColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                val nameColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                val mimeColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                
+                while (cursor.moveToNext()) {
+                    val id = cursor.getString(idColumn)
+                    val name = cursor.getString(nameColumn)
+                    val mime = cursor.getString(mimeColumn)
+                    
+                    if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+                        scanDirectoryRecursive(context, rootUri, id, results)
+                    } else if (isArchiveFile(name)) {
+                        val childUri = DocumentsContract.buildDocumentUriUsingTree(rootUri, id)
+                        results.add(childUri to name)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error scanning directory $parentDocumentId", e)
+        }
     }
 
     private fun md5(s: String): String {

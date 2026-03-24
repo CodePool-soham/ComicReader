@@ -96,9 +96,6 @@ class MainActivity : ComponentActivity() {
 
     /**
      * Handles incoming intents, specifically for viewing comic files.
-     *
-     * @param intent The [Intent] to handle.
-     * @param navController The [NavHostController] used for navigation.
      */
     private fun handleIntent(intent: Intent?, navController: NavHostController) {
         if (intent?.action == Intent.ACTION_VIEW) {
@@ -112,8 +109,6 @@ class MainActivity : ComponentActivity() {
 
 /**
  * The main composable representing the application's navigation structure.
- *
- * @param navController The [NavHostController] for managing navigation between screens.
  */
 @Composable
 fun ComicApp(navController: NavHostController) {
@@ -143,8 +138,6 @@ fun ComicApp(navController: NavHostController) {
 
 /**
  * Composable screen for displaying the comic library.
- *
- * @param onComicClick Callback invoked when a comic is clicked, passing its [Uri].
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -185,16 +178,20 @@ fun LibraryScreen(onComicClick: (Uri) -> Unit) {
 
     /**
      * Updates the library list based on the provided set of [Uri] strings.
+     * Efficiently loads metadata only when needed.
      */
     fun updateComics(uris: Set<String>) {
         scope.launch {
             isLoadingLibrary = true
             val comicList = withContext(Dispatchers.IO) {
-                uris.map { uriString ->
-                    val uri = Uri.parse(uriString)
-                    val name = DocumentFile.fromSingleUri(context, uri)?.name
-                               ?: uri.lastPathSegment ?: "Unknown"
-                    Comic(uri = uri, name = name)
+                uris.mapNotNull { uriString ->
+                    try {
+                        val uri = Uri.parse(uriString)
+                        val name = ComicUtils.getFileName(context, uri) ?: "Unknown"
+                        Comic(uri = uri, name = name)
+                    } catch (e: Exception) {
+                        null
+                    }
                 }.sortedWith(compareBy(NaturalOrderComparator()) { it.name })
             }
             comics = comicList
@@ -224,6 +221,7 @@ fun LibraryScreen(onComicClick: (Uri) -> Unit) {
         onResult = { uri ->
             uri?.let { treeUri ->
                 scope.launch {
+                    isLoadingLibrary = true
                     withContext(Dispatchers.IO) {
                         try {
                             context.contentResolver.takePersistableUriPermission(
@@ -232,20 +230,30 @@ fun LibraryScreen(onComicClick: (Uri) -> Unit) {
                             )
                         } catch (e: Exception) {}
 
-                        val pickedDir = DocumentFile.fromTreeUri(context, treeUri)
-                        val foundUris = mutableListOf<String>()
-                        pickedDir?.listFiles()?.forEach { file ->
-                            val name = file.name?.lowercase() ?: ""
-                            if (name.endsWith(".cbz") || name.endsWith(".zip") || name.endsWith(".cbr") || name.endsWith(".rar")) {
-                                foundUris.add(file.uri.toString())
-                            }
-                        }
+                        val foundItems = mutableListOf<Pair<Uri, String>>()
+                        ComicUtils.scanDirectory(context, treeUri, foundItems)
 
-                        if (foundUris.isNotEmpty()) {
+                        if (foundItems.isNotEmpty()) {
                             val currentUris = prefs.getStringSet("comic_uris", emptySet())?.toMutableSet() ?: mutableSetOf()
-                            currentUris.addAll(foundUris)
+                            currentUris.addAll(foundItems.map { it.first.toString() })
                             prefs.edit().putStringSet("comic_uris", currentUris).apply()
-                            updateComics(currentUris)
+                            
+                            // Immediately update comics list from the scan results to avoid redundant disk queries
+                            val newComicList = currentUris.map { uriStr ->
+                                val u = Uri.parse(uriStr)
+                                val name = foundItems.find { it.first == u }?.second 
+                                           ?: ComicUtils.getFileName(context, u) ?: "Unknown"
+                                Comic(uri = u, name = name)
+                            }.sortedWith(compareBy(NaturalOrderComparator()) { it.name })
+                            
+                            withContext(Dispatchers.Main) {
+                                comics = newComicList
+                                isLoadingLibrary = false
+                            }
+                        } else {
+                            withContext(Dispatchers.Main) {
+                                isLoadingLibrary = false
+                            }
                         }
                     }
                 }
@@ -292,6 +300,18 @@ fun LibraryScreen(onComicClick: (Uri) -> Unit) {
                             }
                         )
                         Text("Vertical Swiping")
+                    }
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = {
+                            prefs.edit().remove("comic_uris").apply()
+                            comics = emptyList()
+                            showSettingsDialog = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Text("Clear Library", color = Color.White)
                     }
                 }
             },
@@ -529,9 +549,6 @@ fun LibraryScreen(onComicClick: (Uri) -> Unit) {
 
 /**
  * Composable for displaying a single comic item in the library grid.
- *
- * @param comic The [Comic] data class representing the comic.
- * @param onClick Callback invoked when the comic item is clicked.
  */
 @Composable
 fun ComicItem(comic: Comic, onClick: () -> Unit) {
@@ -710,14 +727,6 @@ fun SeriesItem(group: ComicGroup, onClick: () -> Unit) {
 
 /**
  * A zoomable and pannable image composable for viewing comic pages.
- *
- * @param bitmap The [Bitmap] to display.
- * @param onZoomChanged Callback invoked when the zoom state changes.
- * @param pageIndex The index of this page.
- * @param currentPage The index of the currently visible page in the pager.
- * @param onToggleUI Callback invoked to toggle the visibility of UI overlays.
- * @param readingMode The current reading mode ("horizontal" or "vertical").
- * @param modifier The [Modifier] for this composable.
  */
 @Composable
 fun ZoomableImage(
@@ -857,9 +866,6 @@ fun ZoomableImage(
 
 /**
  * Composable screen for reading a comic.
- *
- * @param uri The [Uri] of the comic file.
- * @param onBack Callback invoked to navigate back.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -881,7 +887,7 @@ fun ReaderScreen(uri: Uri, onBack: () -> Unit) {
 
     val fileName = remember(uri) {
         try {
-            DocumentFile.fromSingleUri(context, uri)?.name ?: uri.lastPathSegment ?: "Reading"
+            ComicUtils.getFileName(context, uri) ?: "Reading"
         } catch (e: Exception) {
             uri.lastPathSegment ?: "Reading"
         }
@@ -1108,15 +1114,6 @@ fun ReaderScreen(uri: Uri, onBack: () -> Unit) {
 
 /**
  * Composable representing a single page in the comic reader.
- *
- * @param uri The [Uri] of the comic file.
- * @param entryName The name of the file entry for this page within the archive.
- * @param viewModel The [ComicViewModel] used for loading the page.
- * @param currentPage The index of the currently visible page.
- * @param pageIndex The index of this page.
- * @param readingMode The current reading mode ("horizontal" or "vertical").
- * @param onZoomChanged Callback invoked when the zoom state changes.
- * @param onToggleUI Callback invoked to toggle the visibility of UI overlays.
  */
 @Composable
 fun ReaderPage(
