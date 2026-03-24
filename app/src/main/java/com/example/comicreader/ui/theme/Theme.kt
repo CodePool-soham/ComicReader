@@ -1,12 +1,18 @@
 package com.example.comicreader.ui.theme
 
+import android.app.Activity
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 
 /**
- * The dark color scheme for the Comic Reader application, inspired by comic book aesthetics.
+ * The dark color scheme for the Comic Reader application.
  */
 private val ComicDarkColorScheme = darkColorScheme(
     primary = PrimaryDark,
@@ -28,18 +34,54 @@ private val ComicDarkColorScheme = darkColorScheme(
 )
 
 /**
+ * The light color scheme for the Comic Reader application.
+ */
+private val ComicLightColorScheme = lightColorScheme(
+    primary = PrimaryLight,
+    onPrimary = OnPrimaryLight,
+    primaryContainer = PrimaryContainerLight,
+    onPrimaryContainer = OnPrimaryContainerLight,
+    secondary = SecondaryLight,
+    onSecondary = OnSecondaryLight,
+    secondaryContainer = SecondaryContainerLight,
+    onSecondaryContainer = OnSecondaryContainerLight,
+    background = BackgroundLight,
+    onBackground = OnBackgroundLight,
+    surface = SurfaceLight,
+    onSurface = OnSurfaceLight,
+    surfaceVariant = SurfaceVariantLight,
+    onSurfaceVariant = OnSurfaceVariantLight,
+    error = Color(0xFFB00020),
+    onError = Color.White
+)
+
+/**
  * The theme for the Comic Reader application.
  *
- * @param darkTheme Whether to use the dark theme. Defaults to true to maintain the comic book look.
+ * @param darkTheme Whether to use the dark theme.
  * @param content The composable content to apply the theme to.
  */
 @Composable
 fun ComicReaderTheme(
-    darkTheme: Boolean = true, // Force Dark Mode for Marvel/DC theme
+    darkTheme: Boolean = true,
     content: @Composable () -> Unit
 ) {
+    val colorScheme = if (darkTheme) ComicDarkColorScheme else ComicLightColorScheme
+    val view = LocalView.current
+    
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as Activity).window
+            // Use WindowCompat to control status bar icon colors.
+            // When in dark theme, we want light icons (isAppearanceLightStatusBars = false)
+            // When in light theme, we want dark icons (isAppearanceLightStatusBars = true)
+            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = !darkTheme
+        }
+    }
+
     MaterialTheme(
-        colorScheme = ComicDarkColorScheme,
+        colorScheme = colorScheme,
         typography = Typography,
         content = content
     )

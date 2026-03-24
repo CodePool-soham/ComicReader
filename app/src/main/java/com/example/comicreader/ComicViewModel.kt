@@ -23,6 +23,7 @@ class ComicViewModel(application: Application) : AndroidViewModel(application) {
     private val TAG = "ComicViewModel"
     private val progressPrefs = application.getSharedPreferences("comic_progress", Context.MODE_PRIVATE)
     private val completedPrefs = application.getSharedPreferences("comic_completed", Context.MODE_PRIVATE)
+    private val timestampPrefs = application.getSharedPreferences("comic_timestamps", Context.MODE_PRIVATE)
 
     private val _currentComicPages = MutableStateFlow<List<String>>(emptyList())
     val currentComicPages: StateFlow<List<String>> = _currentComicPages
@@ -36,10 +37,8 @@ class ComicViewModel(application: Application) : AndroidViewModel(application) {
     private var cachedComicFile: File? = null
     private var cachedUri: Uri? = null
 
-    // Simple LruCache for bitmaps to reduce CPU usage when flipping pages
     private val bitmapCache = object : LruCache<String, Bitmap>(3) {
         override fun entryRemoved(evicted: Boolean, key: String?, oldValue: Bitmap?, newValue: Bitmap?) {
-            // No explicit recycle here as Compose might still be using it during transition
         }
     }
 
@@ -131,6 +130,7 @@ class ComicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun saveLastReadPage(uri: Uri, page: Int, totalPages: Int) {
         progressPrefs.edit().putInt(uri.toString(), page).apply()
+        timestampPrefs.edit().putLong(uri.toString(), System.currentTimeMillis()).apply()
         if (page >= totalPages - 1 && totalPages > 0) {
             setCompleted(uri, true)
         }
@@ -138,6 +138,10 @@ class ComicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun getLastReadPage(uri: Uri): Int {
         return progressPrefs.getInt(uri.toString(), 0)
+    }
+
+    fun getLastReadTime(uri: Uri): Long {
+        return timestampPrefs.getLong(uri.toString(), 0L)
     }
 
     fun setCompleted(uri: Uri, completed: Boolean) {
@@ -150,6 +154,7 @@ class ComicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun resetProgress(uri: Uri) {
         progressPrefs.edit().remove(uri.toString()).apply()
+        timestampPrefs.edit().remove(uri.toString()).apply()
         setCompleted(uri, false)
     }
 }
