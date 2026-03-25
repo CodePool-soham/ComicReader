@@ -7,7 +7,6 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -16,6 +15,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -25,13 +25,16 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -41,6 +44,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
@@ -54,7 +58,6 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -64,7 +67,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -408,7 +410,7 @@ fun LibraryScreen(
                     ) {
                         LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             items(comics.filter { it.name.contains(searchQuery, true) }) { comic ->
-                                SearchResultItem(comic = comic, onClick = { onComicClick(comic.uri) })
+                                SearchResultItem(comic = comic, isCompleted = viewModel.isCompleted(comic.uri), onClick = { onComicClick(comic.uri) })
                             }
                         }
                     }
@@ -447,7 +449,7 @@ fun LibraryScreen(
                     val group = groupedComics.find { it.title == selectedGroupTitle }
                     LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         items(group?.comics ?: emptyList()) { comic ->
-                            SearchResultItem(comic = comic, onClick = { onComicClick(comic.uri) })
+                            SearchResultItem(comic = comic, isCompleted = viewModel.isCompleted(comic.uri), onClick = { onComicClick(comic.uri) })
                         }
                     }
                 } else {
@@ -467,6 +469,7 @@ fun LibraryScreen(
                                 val comic = lastReadComics[page]
                                 FeaturedComicItem(
                                     comic = comic,
+                                    isCompleted = viewModel.isCompleted(comic.uri),
                                     modifier = Modifier.graphicsLayer {
                                         val pageOffset = ((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction)
                                         alpha = 1f - (abs(pageOffset) * 0.3f)
@@ -500,7 +503,7 @@ fun LibraryScreen(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 items(comics.take(15)) { comic ->
-                                    ComicCard(comic = comic, onClick = { onComicClick(comic.uri) })
+                                    ComicCard(comic = comic, isCompleted = viewModel.isCompleted(comic.uri), onClick = { onComicClick(comic.uri) })
                                 }
                             }
                         }
@@ -515,7 +518,7 @@ fun LibraryScreen(
                                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
                                     items(completedComics) { comic ->
-                                        ComicCard(comic = comic, onClick = { onComicClick(comic.uri) })
+                                        ComicCard(comic = comic, isCompleted = true, onClick = { onComicClick(comic.uri) })
                                     }
                                 }
                             }
@@ -530,7 +533,7 @@ fun LibraryScreen(
 }
 
 @Composable
-fun SearchResultItem(comic: Comic, onClick: () -> Unit) {
+fun SearchResultItem(comic: Comic, isCompleted: Boolean, onClick: () -> Unit) {
     val context = LocalContext.current
     var thumbnailFile by remember { mutableStateOf<File?>(null) }
     LaunchedEffect(comic.uri) {
@@ -540,13 +543,30 @@ fun SearchResultItem(comic: Comic, onClick: () -> Unit) {
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Card(modifier = Modifier.size(60.dp, 90.dp)) {
-            AsyncImage(
-                model = ImageRequest.Builder(LocalContext.current).data(thumbnailFile).crossfade(true).build(),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
+        Box(modifier = Modifier.size(60.dp, 90.dp)) {
+            Card(modifier = Modifier.fillMaxSize()) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current).data(thumbnailFile).crossfade(true).build(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            if (isCompleted) {
+                Surface(
+                    modifier = Modifier.align(Alignment.TopEnd).padding(4.dp).size(18.dp),
+                    shape = CircleShape,
+                    color = Color.White,
+                    shadowElevation = 2.dp
+                ) {
+                    Icon(
+                        Icons.Default.CheckCircle,
+                        contentDescription = "Completed",
+                        tint = Color(0xFF4CAF50),
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
         }
         Spacer(Modifier.width(16.dp))
         Text(comic.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -554,7 +574,7 @@ fun SearchResultItem(comic: Comic, onClick: () -> Unit) {
 }
 
 @Composable
-fun FeaturedComicItem(comic: Comic, modifier: Modifier = Modifier, onClick: () -> Unit) {
+fun FeaturedComicItem(comic: Comic, isCompleted: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val context = LocalContext.current
     var thumbnailFile by remember { mutableStateOf<File?>(null) }
     
@@ -582,6 +602,22 @@ fun FeaturedComicItem(comic: Comic, modifier: Modifier = Modifier, onClick: () -
                 )
                 Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(0.7f)), startY = 300f)))
                 
+                if (isCompleted) {
+                    Surface(
+                        modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).size(24.dp),
+                        shape = CircleShape,
+                        color = Color.White,
+                        shadowElevation = 4.dp
+                    ) {
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = "Completed",
+                            tint = Color(0xFF4CAF50),
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                }
+
                 Text(
                     comic.name,
                     color = Color.White,
@@ -597,7 +633,7 @@ fun FeaturedComicItem(comic: Comic, modifier: Modifier = Modifier, onClick: () -
 }
 
 @Composable
-fun ComicCard(comic: Comic, onClick: () -> Unit) {
+fun ComicCard(comic: Comic, isCompleted: Boolean, onClick: () -> Unit) {
     val context = LocalContext.current
     var thumbnailFile by remember { mutableStateOf<File?>(null) }
     
@@ -606,17 +642,34 @@ fun ComicCard(comic: Comic, onClick: () -> Unit) {
     }
 
     Column(modifier = Modifier.width(120.dp).clickable(onClick = onClick)) {
-        Card(
-            shape = RoundedCornerShape(8.dp),
-            elevation = CardDefaults.cardElevation(2.dp),
-            modifier = Modifier.height(180.dp).fillMaxWidth()
-        ) {
-            AsyncImage(
-                model = ImageRequest.Builder(LocalContext.current).data(thumbnailFile).crossfade(true).build(),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
+        Box(modifier = Modifier.height(180.dp).fillMaxWidth()) {
+            Card(
+                shape = RoundedCornerShape(8.dp),
+                elevation = CardDefaults.cardElevation(2.dp),
                 modifier = Modifier.fillMaxSize()
-            )
+            ) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current).data(thumbnailFile).crossfade(true).build(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            if (isCompleted) {
+                Surface(
+                    modifier = Modifier.align(Alignment.TopEnd).padding(4.dp).size(20.dp),
+                    shape = CircleShape,
+                    color = Color.White,
+                    shadowElevation = 2.dp
+                ) {
+                    Icon(
+                        Icons.Default.CheckCircle,
+                        contentDescription = "Completed",
+                        tint = Color(0xFF4CAF50),
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
         }
         Text(
             comic.name,
@@ -843,27 +896,35 @@ fun ReaderScreen(uri: Uri, isDarkMode: Boolean, analyticsManager: AnalyticsManag
                 TopAppBar(
                     title = { Text(ComicUtils.getFileName(context, uri) ?: "", color = Color.White, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.White) } },
-                    actions = { IconButton(onClick = { showJumpDialog = true }) { Icon(Icons.Default.Menu, null, tint = Color.White) } },
+                    actions = { IconButton(onClick = { showJumpDialog = true }) { Icon(Icons.Default.GridView, "Jump to Page", tint = Color.White) } },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Black.copy(0.7f))
                 )
             }
 
             AnimatedVisibility(visible = isUIVisible, enter = slideInVertically { it }, exit = slideOutVertically { it }, modifier = Modifier.align(Alignment.BottomCenter)) {
-                Surface(color = Color.Black.copy(0.7f), modifier = Modifier.fillMaxWidth()) {
-                    Text("${pagerState.currentPage + 1} / ${pages.size}", color = Color.White, modifier = Modifier.padding(16.dp), textAlign = TextAlign.Center)
+                Surface(
+                    color = Color.Black.copy(0.7f), 
+                    modifier = Modifier.fillMaxWidth().clickable { showJumpDialog = true }
+                ) {
+                    Text(
+                        "${pagerState.currentPage + 1} / ${pages.size}", 
+                        color = Color.White, 
+                        modifier = Modifier.padding(16.dp), 
+                        textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.labelLarge
+                    )
                 }
             }
 
             if (showJumpDialog) {
-                var jumpText by remember { mutableStateOf((pagerState.currentPage + 1).toString()) }
-                AlertDialog(
-                    onDismissRequest = { showJumpDialog = false },
-                    title = { Text("Jump to Page") },
-                    text = { TextField(value = jumpText, onValueChange = { jumpText = it }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)) },
-                    confirmButton = { TextButton(onClick = {
-                        jumpText.toIntOrNull()?.let { p -> if (p in 1..pages.size) scope.launch { pagerState.scrollToPage(p - 1) } }
+                JumpToPageDialog(
+                    currentPage = pagerState.currentPage,
+                    totalPages = pages.size,
+                    onPageSelected = { pageIndex ->
+                        scope.launch { pagerState.scrollToPage(pageIndex) }
                         showJumpDialog = false
-                    }) { Text("Go") } }
+                    },
+                    onDismiss = { showJumpDialog = false }
                 )
             }
         }
@@ -888,4 +949,110 @@ fun ReaderPage(uri: Uri, entryName: String, viewModel: ComicViewModel, currentPa
             ZoomableImage(it, onZoomChanged, pageIndex, currentPage, onToggleUI, readingMode)
         } ?: CircularProgressIndicator()
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun JumpToPageDialog(
+    currentPage: Int,
+    totalPages: Int,
+    onPageSelected: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var selectedRange by remember { 
+        mutableStateOf<IntRange?>(if (totalPages <= 30) 0 until totalPages else null) 
+    }
+    val rangeSize = 25
+    val ranges = (0 until totalPages step rangeSize).map {
+        it until minOf(it + rangeSize, totalPages)
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Jump to Page") },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth().heightIn(max = 450.dp)) {
+                if (selectedRange == null) {
+                    Text("Select Range:", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                    Spacer(Modifier.height(8.dp))
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.weight(1f, fill = false)
+                    ) {
+                        items(ranges) { range ->
+                            val isCurrentInRange = currentPage in range
+                            OutlinedCard(
+                                onClick = { selectedRange = range },
+                                modifier = Modifier.fillMaxWidth(),
+                                border = if (isCurrentInRange) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                colors = CardDefaults.outlinedCardColors(
+                                    containerColor = if (isCurrentInRange) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) else Color.Transparent
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        "Pages ${range.first + 1} - ${range.last + 1}",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = if (isCurrentInRange) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                    if (isCurrentInRange) {
+                                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                    ) {
+                        if (totalPages > 30) {
+                            IconButton(onClick = { selectedRange = null }) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to ranges")
+                            }
+                        }
+                        Text(
+                            "Pages ${selectedRange!!.first + 1} - ${selectedRange!!.last + 1}",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(5),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.weight(1f, fill = false)
+                    ) {
+                        items(selectedRange!!.toList()) { pageIndex ->
+                            val isCurrentPage = pageIndex == currentPage
+                            Surface(
+                                onClick = { onPageSelected(pageIndex) },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isCurrentPage) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.aspectRatio(1f)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = (pageIndex + 1).toString(),
+                                        color = if (isCurrentPage) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = if (isCurrentPage) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        }
+    )
 }
