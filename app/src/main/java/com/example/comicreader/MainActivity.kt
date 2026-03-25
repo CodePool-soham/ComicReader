@@ -36,8 +36,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Menu
@@ -77,6 +79,11 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.example.comicreader.data.AnalyticsManager
+import com.example.comicreader.data.AppDatabase
+import com.example.comicreader.data.DuplicateManager
+import com.example.comicreader.ui.AnalyticsScreen
+import com.example.comicreader.ui.DuplicateManagerScreen
 import com.example.comicreader.ui.theme.ComicReaderTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -94,10 +101,14 @@ class MainActivity : ComponentActivity() {
             var isDarkMode by remember { 
                 mutableStateOf(prefs.getBoolean("dark_mode", true)) 
             }
+            
+            val db = remember { AppDatabase.getDatabase(context) }
+            val duplicateManager = remember { DuplicateManager(context, db.comicDao()) }
+            val analyticsManager = remember { AnalyticsManager(db.comicDao()) }
 
             ComicReaderTheme(darkTheme = isDarkMode) {
                 val navController = rememberNavController()
-                ComicApp(navController, isDarkMode, onToggleDarkMode = {
+                ComicApp(navController, isDarkMode, analyticsManager, duplicateManager, onToggleDarkMode = {
                     isDarkMode = it
                     prefs.edit().putBoolean("dark_mode", it).apply()
                 })
@@ -119,7 +130,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun ComicApp(navController: NavHostController, isDarkMode: Boolean, onToggleDarkMode: (Boolean) -> Unit) {
+fun ComicApp(navController: NavHostController, isDarkMode: Boolean, analyticsManager: AnalyticsManager, duplicateManager: DuplicateManager, onToggleDarkMode: (Boolean) -> Unit) {
     NavHost(navController = navController, startDestination = "library") {
         composable("library") {
             LibraryScreen(
@@ -128,7 +139,9 @@ fun ComicApp(navController: NavHostController, isDarkMode: Boolean, onToggleDark
                 onComicClick = { uri ->
                     val encodedUri = Uri.encode(uri.toString())
                     navController.navigate("reader/$encodedUri")
-                }
+                },
+                onNavigateToAnalytics = { navController.navigate("analytics") },
+                onNavigateToDuplicates = { navController.navigate("duplicates") }
             )
         }
         composable(
@@ -137,7 +150,13 @@ fun ComicApp(navController: NavHostController, isDarkMode: Boolean, onToggleDark
         ) { backStackEntry ->
             val comicUriStr = backStackEntry.arguments?.getString("comicUri") ?: ""
             val comicUri = Uri.parse(comicUriStr)
-            ReaderScreen(uri = comicUri, isDarkMode = isDarkMode, onBack = { navController.popBackStack() })
+            ReaderScreen(uri = comicUri, isDarkMode = isDarkMode, analyticsManager = analyticsManager, onBack = { navController.popBackStack() })
+        }
+        composable("analytics") {
+            AnalyticsScreen(analyticsManager)
+        }
+        composable("duplicates") {
+            DuplicateManagerScreen(duplicateManager, emptyList())
         }
     }
 }
@@ -172,7 +191,13 @@ fun SectionHeader(title: String, isDarkMode: Boolean) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LibraryScreen(isDarkMode: Boolean, onToggleDarkMode: (Boolean) -> Unit, onComicClick: (Uri) -> Unit) {
+fun LibraryScreen(
+    isDarkMode: Boolean, 
+    onToggleDarkMode: (Boolean) -> Unit, 
+    onComicClick: (Uri) -> Unit,
+    onNavigateToAnalytics: () -> Unit,
+    onNavigateToDuplicates: () -> Unit
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val viewModel: ComicViewModel = viewModel()
@@ -338,6 +363,28 @@ fun LibraryScreen(isDarkMode: Boolean, onToggleDarkMode: (Boolean) -> Unit, onCo
                         onToggleDarkMode(!isDarkMode)
                     },
                     icon = { Icon(if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode, null) },
+                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                )
+
+                NavigationDrawerItem(
+                    label = { Text("Analytics") },
+                    selected = false,
+                    onClick = { 
+                        scope.launch { drawerState.close() }
+                        onNavigateToAnalytics()
+                    },
+                    icon = { Icon(Icons.Default.Assessment, null) },
+                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                )
+
+                NavigationDrawerItem(
+                    label = { Text("Duplicate Finder") },
+                    selected = false,
+                    onClick = { 
+                        scope.launch { drawerState.close() }
+                        onNavigateToDuplicates()
+                    },
+                    icon = { Icon(Icons.Default.ContentCopy, null) },
                     modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                 )
 
@@ -708,7 +755,7 @@ fun ZoomableImage(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ReaderScreen(uri: Uri, isDarkMode: Boolean, onBack: () -> Unit) {
+fun ReaderScreen(uri: Uri, isDarkMode: Boolean, analyticsManager: AnalyticsManager, onBack: () -> Unit) {
     val view = LocalView.current
     
     // In ReaderScreen, we always want light icons (white) because the background is black.
@@ -740,7 +787,24 @@ fun ReaderScreen(uri: Uri, isDarkMode: Boolean, onBack: () -> Unit) {
     val prefs = remember { context.getSharedPreferences("comics_prefs", Context.MODE_PRIVATE) }
     val readingMode = remember { prefs.getString("reading_mode", "horizontal") ?: "horizontal" }
 
-    LaunchedEffect(uri) { viewModel.loadComic(uri) }
+    var sessionStartTime by remember { mutableLongStateOf(0L) }
+    var startPage by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(uri) { 
+        viewModel.loadComic(uri) 
+        sessionStartTime = System.currentTimeMillis()
+    }
+
+    DisposableEffect(uri) {
+        onDispose {
+            val duration = System.currentTimeMillis() - sessionStartTime
+            if (duration > 5000) {
+                val endPage = viewModel.getLastReadPage(uri)
+                val totalReadInThisSession = abs(endPage - startPage)
+                analyticsManager.trackSession(uri.toString(), sessionStartTime, System.currentTimeMillis(), totalReadInThisSession)
+            }
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         if (isLoading) {
@@ -751,13 +815,18 @@ fun ReaderScreen(uri: Uri, isDarkMode: Boolean, onBack: () -> Unit) {
 
             LaunchedEffect(pages) {
                 if (!initialPageSet) {
-                    if (lastRead > 0) pagerState.scrollToPage(lastRead)
+                    if (lastRead > 0) {
+                        pagerState.scrollToPage(lastRead)
+                        startPage = lastRead
+                    }
                     initialPageSet = true
                 }
             }
 
             LaunchedEffect(pagerState.currentPage) {
-                if (initialPageSet) viewModel.saveLastReadPage(uri, pagerState.currentPage, pages.size)
+                if (initialPageSet) {
+                    viewModel.saveLastReadPage(uri, pagerState.currentPage, pages.size)
+                }
             }
 
             if (readingMode == "horizontal") {
