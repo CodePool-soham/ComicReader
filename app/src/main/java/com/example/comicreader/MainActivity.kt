@@ -93,6 +93,10 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.math.abs
 
+/**
+ * Main entry point for the Comic Vault application.
+ * Handles theme switching, navigation setup, and intent handling for external file opening.
+ */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -121,6 +125,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Handles incoming intents, specifically ACTION_VIEW for opening comic files from external apps.
+     */
     private fun handleIntent(intent: Intent?, navController: NavHostController) {
         if (intent?.action == Intent.ACTION_VIEW) {
             intent.data?.let { uri ->
@@ -131,6 +138,9 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/**
+ * Main navigation host for the application.
+ */
 @Composable
 fun ComicApp(navController: NavHostController, isDarkMode: Boolean, analyticsManager: AnalyticsManager, duplicateManager: DuplicateManager, onToggleDarkMode: (Boolean) -> Unit) {
     NavHost(navController = navController, startDestination = "library") {
@@ -163,6 +173,9 @@ fun ComicApp(navController: NavHostController, isDarkMode: Boolean, analyticsMan
     }
 }
 
+/**
+ * A stylized header for different sections in the library.
+ */
 @Composable
 fun SectionHeader(title: String, isDarkMode: Boolean) {
     val boxColor = if (isDarkMode) Color(0xFFE23636) else Color(0xFF0052CC)
@@ -191,6 +204,9 @@ fun SectionHeader(title: String, isDarkMode: Boolean) {
     }
 }
 
+/**
+ * The main screen displaying the comic library, categorized by series, recently added, and completed.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
@@ -217,6 +233,9 @@ fun LibraryScreen(
         mutableStateOf(prefs.getString("reading_mode", "horizontal") ?: "horizontal") 
     }
 
+    /**
+     * Extracts a base title from a filename by removing common issue/volume numbering.
+     */
     fun getBaseTitle(name: String): String {
         val nameWithoutExt = name.substringBeforeLast('.')
         val regex = Regex("""\s*(#\s*\d+|(?<=\s)\d+|v\d+|vol\d+|volume\d+).*$""", RegexOption.IGNORE_CASE)
@@ -243,6 +262,9 @@ fun LibraryScreen(
             .sortedByDescending { viewModel.getLastReadTime(it.uri) }
     }
 
+    /**
+     * Updates the local comic list from a set of URIs.
+     */
     fun updateComics(uris: Set<String>) {
         scope.launch {
             isLoadingLibrary = true
@@ -532,6 +554,9 @@ fun LibraryScreen(
     }
 }
 
+/**
+ * A list item representing a comic in search results or within a series group.
+ */
 @Composable
 fun SearchResultItem(comic: Comic, isCompleted: Boolean, onClick: () -> Unit) {
     val context = LocalContext.current
@@ -573,6 +598,9 @@ fun SearchResultItem(comic: Comic, isCompleted: Boolean, onClick: () -> Unit) {
     }
 }
 
+/**
+ * A prominent card for "Continue Reading" section with larger thumbnails.
+ */
 @Composable
 fun FeaturedComicItem(comic: Comic, isCompleted: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val context = LocalContext.current
@@ -632,6 +660,9 @@ fun FeaturedComicItem(comic: Comic, isCompleted: Boolean, modifier: Modifier = M
     }
 }
 
+/**
+ * A standard card for displaying individual comics in lists.
+ */
 @Composable
 fun ComicCard(comic: Comic, isCompleted: Boolean, onClick: () -> Unit) {
     val context = LocalContext.current
@@ -682,6 +713,9 @@ fun ComicCard(comic: Comic, isCompleted: Boolean, onClick: () -> Unit) {
     }
 }
 
+/**
+ * A card representing a group of comics (a series).
+ */
 @Composable
 fun SeriesCard(group: ComicGroup, onClick: () -> Unit) {
     val context = LocalContext.current
@@ -715,6 +749,9 @@ fun SeriesCard(group: ComicGroup, onClick: () -> Unit) {
     }
 }
 
+/**
+ * A component that enables pinch-to-zoom and panning on a comic page image.
+ */
 @Composable
 fun ZoomableImage(
     bitmap: Bitmap,
@@ -806,6 +843,9 @@ fun ZoomableImage(
     }
 }
 
+/**
+ * The reader screen that handles paging through comic pages, zoom status, and analytics tracking.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReaderScreen(uri: Uri, isDarkMode: Boolean, analyticsManager: AnalyticsManager, onBack: () -> Unit) {
@@ -931,6 +971,9 @@ fun ReaderScreen(uri: Uri, isDarkMode: Boolean, analyticsManager: AnalyticsManag
     }
 }
 
+/**
+ * A wrapper for a single page in the reader, responsible for loading the bitmap.
+ */
 @Composable
 fun ReaderPage(uri: Uri, entryName: String, viewModel: ComicViewModel, currentPage: Int, pageIndex: Int, readingMode: String, onZoomChanged: (Boolean) -> Unit, onToggleUI: () -> Unit) {
     val configuration = LocalConfiguration.current
@@ -951,6 +994,9 @@ fun ReaderPage(uri: Uri, entryName: String, viewModel: ComicViewModel, currentPa
     }
 }
 
+/**
+ * A dialog that allows the user to quickly jump to a specific page or range of pages.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun JumpToPageDialog(

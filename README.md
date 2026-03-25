@@ -1,4 +1,4 @@
-# Eikonix
+# Eikonix - Comic Vault
 
 A modern, Jetpack Compose-based Android application for reading comic books in `.cbz` and `.zip` formats. Inspired by the bold aesthetics of Marvel and DC, Eikonix offers a seamless and immersive reading experience.
 
@@ -6,6 +6,8 @@ A modern, Jetpack Compose-based Android application for reading comic books in `
 
 - **📂 Library Management**: Easily add folders from your device to automatically scan for and organize your comic collection.
 - **📖 Flexible Reading Modes**: Choose between **Horizontal Sliding** and **Vertical Swiping** to suit your reading preference.
+- **📊 Reading Analytics**: Track your reading habits, including total comics read, pages read, session durations, and reading streaks.
+- **👯 Duplicate Finder**: Identify and manage duplicate comic files in your library to save space.
 - **🔍 Fast Search**: Quickly find any comic in your library with the integrated search functionality.
 - **🔎 Zoom & Pan**: High-quality image rendering with support for pinch-to-zoom, double-tap to zoom, and smooth panning.
 - **🎨 Comic-Inspired Theme**: A striking dark theme with a palette inspired by classic comic book colors.
@@ -16,8 +18,10 @@ A modern, Jetpack Compose-based Android application for reading comic books in `
 
 - **UI**: [Jetpack Compose](https://developer.android.com/jetpack/compose) for a modern, declarative UI.
 - **Navigation**: [Compose Navigation](https://developer.android.com/jetpack/compose/navigation).
+- **Database**: [Room Persistence Library](https://developer.android.com/training/data-storage/room) for analytics and comic metadata.
 - **Architecture**: MVVM (Model-View-ViewModel) with `StateFlow` and `viewModelScope`.
 - **Concurrency**: Kotlin Coroutines and Flow for asynchronous operations.
+- **Image Loading**: [Coil](https://coil-kt.github.io/coil/) for efficient image loading and caching.
 - **File Handling**: Android Storage Access Framework (SAF) and `ZipInputStream` for reading archive files.
 
 ## Project Structure
@@ -26,6 +30,7 @@ A modern, Jetpack Compose-based Android application for reading comic books in `
 - `ComicViewModel.kt`: Manages the state of the current comic, including page loading and bitmap retrieval.
 - `ComicUtils.kt`: Utility functions for parsing CBZ files, extracting thumbnails, and handling natural order sorting.
 - `ComicModel.kt`: Defines the data structures for `Comic` and `ComicPage`.
+- `data/`: Data layer containing Room database, DAOs, and managers for Analytics and Duplicates.
 - `ui.theme/`: Custom Material 3 theme implementation with comic-inspired colors and typography.
 
 ## Getting Started
