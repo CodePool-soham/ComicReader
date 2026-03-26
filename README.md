@@ -44,8 +44,6 @@ A modern, Jetpack Compose-based Android application for reading comic books in `
 
 <img width="327" height="561" alt="image" src="https://github.com/user-attachments/assets/510baae9-8c1a-4199-b0d7-1fdc7ec3a26c" />
 
-<img width="353" height="738" alt="image" src="https://github.com/user-attachments/assets/13ffca52-0235-4494-a10a-a206107d28a8" />
-
 ---
 
 Developed with ❤️ for comic enthusiasts.
