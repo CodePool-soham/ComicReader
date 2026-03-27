@@ -132,17 +132,34 @@ class MainActivity : ComponentActivity() {
         if (intent?.action == Intent.ACTION_VIEW) {
             intent.data?.let { uri ->
                 val encodedUri = Uri.encode(uri.toString())
-                navController.navigate("reader/$encodedUri")
+                navController.navigate("reader/$encodedUri") {
+                    launchSingleTop = true
+                }
             }
         }
     }
 }
 
 /**
- * Main navigation host for the application.
+ * Main navigation host for the application with debounced navigation guarding.
  */
 @Composable
 fun ComicApp(navController: NavHostController, isDarkMode: Boolean, analyticsManager: AnalyticsManager, duplicateManager: DuplicateManager, onToggleDarkMode: (Boolean) -> Unit) {
+    // Navigation guard to prevent multiple rapid clicks
+    var lastNavTime by remember { mutableLongStateOf(0L) }
+    val navThreshold = 800L // ms
+
+    val safeNavigate: (String) -> Unit = { route ->
+        val currentTime = System.currentTimeMillis()
+        if (currentTime - lastNavTime > navThreshold) {
+            lastNavTime = currentTime
+            navController.navigate(route) {
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+    }
+
     NavHost(navController = navController, startDestination = "library") {
         composable("library") {
             LibraryScreen(
@@ -150,10 +167,10 @@ fun ComicApp(navController: NavHostController, isDarkMode: Boolean, analyticsMan
                 onToggleDarkMode = onToggleDarkMode,
                 onComicClick = { uri ->
                     val encodedUri = Uri.encode(uri.toString())
-                    navController.navigate("reader/$encodedUri")
+                    safeNavigate("reader/$encodedUri")
                 },
-                onNavigateToAnalytics = { navController.navigate("analytics") },
-                onNavigateToDuplicates = { navController.navigate("duplicates") }
+                onNavigateToAnalytics = { safeNavigate("analytics") },
+                onNavigateToDuplicates = { safeNavigate("duplicates") }
             )
         }
         composable(
